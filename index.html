@@ -20,7 +20,7 @@
         var signalling_server_address = signalling_server_hostname + ':' + (location.port || (location.protocol === 'https:' ? 443 : 80));
         var pcConfig = {
             "iceServers": [
-                {"urls": ["stun:stun.l.google.com:19302", "stun:" + signalling_server_hostname + ":3478"]}
+                {"urls": [/*stun:stun.l.google.com:19302",*/ "stun:" + signalling_server_hostname + ":3478"]}
             ]
         };
         var pcOptions = {
@@ -42,19 +42,63 @@
             console.log("Remote stream added:", URL.createObjectURL(event.stream));
             var remoteVideoElement = document.getElementById('remote-video');
             remoteVideoElement.src = URL.createObjectURL(event.stream);
+
+            //prepare canvas
+            var canvas = document.getElementById('waveform-canvas');
+            var sctxt = canvas.getContext('2d');
+            sctxt.fillRect(0,0,512,200);
+            sctxt.strokeStyle = "#FFFFFF";
+            sctxt.lineWidth = 2;
+
+            //prepare audio data
+            var audioCtx = new AudioContext();
+            var source = audioCtx.createMediaElementSource(remoteVideoElement);
+            console.log("source",source);
+
+            //prepare filter graph
+            var analyzer = audioCtx.createAnalyser();
+            analyzer.fftSize = 2048;
+            analyzer.smoothingTimeConstant = 0.5;
+            source.connect(analyzer);
+            analyzer.connect(audioCtx.destination);
+
+            // data from the analyser node
+            var buffer = new Uint8Array(analyzer.frequencyBinCount);
+
+            function draw(){
+
+                window.requestAnimationFrame(draw);
+
+                console.log("start draw");
+
+                analyzer.getByteTimeDomainData(buffer);
+
+                // do the canvas painting
+                var width = canvas.width;
+                console.log("width",width);
+                var height = canvas.height;
+                console.log("height",height);
+                var step = parseInt(buffer.length / width);
+                console.log("step",step);
+                sctxt.fillRect(0,0,width,height);
+                sctxt.drawImage(canvas,0,0,width,height);
+                sctxt.beginPath();
+                sctxt.moveTo(0,buffer[0] * height / 256);
+
+                for(var i=1;i< width;i++){
+                    console.log(i);
+                    console.log(i*step);
+                    console.log(buffer[i*step] * height / 256);
+
+                    sctxt.lineTo(i,buffer[i*step] * height / 256);
+                }
+                sctxt.stroke();
+
+            }
+
+            remoteVideoElement.addEventListener("play", draw, false);
+
             remoteVideoElement.play();
-
-
-            //TODO;audiocontext
-            // http://blog.scottlogic.com/2016/01/06/audio-api-with-d3.html
-            var ctx = new AudioContext();
-            var sourceNode = ctx.createMediaElementSource(remoteVideoElement);
-            var analyser = ctx.createAnalyser();
-            sourceNode.connect(analyser);
-            analyser.connect(ctx.destination);
-
-
-
 
         }
 
@@ -233,8 +277,11 @@
 </head>
 <body>
 <div style="text-align:center">
-    <video id="remote-video" autoplay width="640" height="480" class="vsc-initialized" data-vscid="ndza16m2s"
+    <video id="remote-video" autoplay width="640" height="480" class="vsc-initialized" data-vscid="ndza16m2s" controls
            src(unknown)></video>
+    <br/>
+    <canvas id="waveform-canvas" width="512" height="200"></canvas>
+
     <div>
         <button id="start" class="button" style="background-color: green; color: white" onclick="start();">Start!
         </button>

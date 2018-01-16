@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -15,6 +16,19 @@
             cursor: pointer;
         }
     </style>
+    <!--
+    @see https://weblike-curtaincall.ssl-lolipop.jp/portfolio-web-sounder/webaudioapi-devices/demos/demo-02
+
+            pi@raspberrypi2:~ $ sudo /etc/init.d/uv4l_uvc remove  046d:0826
+            pi@raspberrypi2:~ $ sudo /etc/init.d/uv4l_uvc add  046d:0826
+            <notice> [core] Trying to load driver 'uvc' from built-in drivers first...
+            <warning> [core] Driver 'uvc' not found
+            <notice> [core] Trying to load driver 'uvc' from external plug-in's instead...
+            <notice> [driver] Video functionality '' recognized at 046d:0826
+            <notice> [core] Device detected!
+            <notice> [core] Registering device node /dev/video0
+            pi@raspberrypi2:~ $
+    -->
     <script type="text/javascript">
         var signalling_server_hostname = "raspberrypi2.local";//location.hostname;
         var signalling_server_address = signalling_server_hostname + ':' + (location.port || (location.protocol === 'https:' ? 443 : 80));
@@ -39,66 +53,216 @@
         };
 
         function onRemoteStreamAdded(event) {
-            console.log("Remote stream added:", URL.createObjectURL(event.stream));
+            //console.log("Remote stream added:", URL.createObjectURL(event.stream));
             var remoteVideoElement = document.getElementById('remote-video');
             remoteVideoElement.src = URL.createObjectURL(event.stream);
 
-            //prepare canvas
-            var canvas = document.getElementById('waveform-canvas');
-            var sctxt = canvas.getContext('2d');
-            sctxt.fillRect(0,0,512,200);
-            sctxt.strokeStyle = "#FFFFFF";
-            sctxt.lineWidth = 2;
+            var context = new AudioContext();
+            var analyser = context.createAnalyser();
+            var timerids = [null, null];
+            var interval = 500;// msec
 
-            //prepare audio data
-            var audioCtx = new AudioContext();
-            var source = audioCtx.createMediaElementSource(remoteVideoElement);
-            console.log("source",source);
+            var drawWave = function(canvas, canvasContext) {
+                return function(domain) {
+                    var width  = canvas.width;
+                    var height = canvas.height;
 
-            //prepare filter graph
-            var analyzer = audioCtx.createAnalyser();
-            analyzer.fftSize = 2048;
-            analyzer.smoothingTimeConstant = 0.5;
-            source.connect(analyzer);
-            analyzer.connect(audioCtx.destination);
+                    var paddingTop    = 20;
+                    var paddingBottom = 20;
+                    var paddingLeft   = 30;
+                    var paddingRight  = 30;
 
-            // data from the analyser node
-            var buffer = new Uint8Array(analyzer.frequencyBinCount);
+                    var innerWidth  = width  - paddingLeft - paddingRight;
+                    var innerHeight = height - paddingTop - paddingBottom;
+                    var innerBottom = height - paddingBottom;
 
-            function draw(){
+                    var middle = (innerHeight / 2) + paddingTop;
 
-                window.requestAnimationFrame(draw);
+                    // Clear previous data
+                    canvasContext.clearRect(0, 0, width, height);
 
-                console.log("start draw");
+                    // Draw sound wave
+                    canvasContext.beginPath();
 
-                analyzer.getByteTimeDomainData(buffer);
+                    var data = null;
 
-                // do the canvas painting
-                var width = canvas.width;
-                console.log("width",width);
-                var height = canvas.height;
-                console.log("height",height);
-                var step = parseInt(buffer.length / width);
-                console.log("step",step);
-                sctxt.fillRect(0,0,width,height);
-                sctxt.drawImage(canvas,0,0,width,height);
-                sctxt.beginPath();
-                sctxt.moveTo(0,buffer[0] * height / 256);
+                    switch (domain) {
+                        case 'time' :
+                            data = new Uint8Array(analyser.fftSize);
+                            analyser.getByteTimeDomainData(data);
 
-                for(var i=1;i< width;i++){
-                    console.log(i);
-                    console.log(i*step);
-                    console.log(buffer[i*step] * height / 256);
+                            canvasContext.moveTo(paddingLeft, middle);
 
-                    sctxt.lineTo(i,buffer[i*step] * height / 256);
-                }
-                sctxt.stroke();
+                            for (var i = 0, len = data.length; i < len; i++) {
+                                var x = Math.floor((i / len) * innerWidth) + paddingLeft;
+                                var y = Math.floor((1 - (data[i] / 255)) * innerHeight) + paddingTop;
 
-            }
+                                canvasContext.lineTo(x, y);
 
-            remoteVideoElement.addEventListener("play", draw, false);
+                                // Sampling period
+                                var period = 1 / context.sampleRate;
 
-            remoteVideoElement.play();
+                                // This value is the number of samples during 5 msec
+                                var n5msec = Math.floor(5 * Math.pow(10, -3) * context.sampleRate);
+
+                                // 5 msec ?
+                                if ((i % n5msec) === 0) {
+                                    var sec  = i * period;             // index -> time
+                                    var msec = sec * Math.pow(10, 3);  // sec -> msec
+                                    var text = Math.round(msec) + ' msec';
+
+                                    canvasContext.fillStyle = 'rgba(255, 0, 0, 1.0)';
+                                    canvasContext.fillRect(x, paddingTop, 1, innerHeight);
+
+                                    canvasContext.fillStyle = 'rgba(255, 255, 255, 1.0)';
+                                    canvasContext.font      = '13px "Times New Roman"';
+                                    canvasContext.fillText(text, (x - (canvasContext.measureText(text).width / 2)), (height - 3));
+                                }
+                            }
+
+                            break;
+                        case 'frequency' :
+                            data = new Float32Array(analyser.frequencyBinCount / 4);
+                            analyser.getFloatFrequencyData(data);
+
+                            analyser.maxDecibels = 0;
+                            analyser.minDecibels = -60;
+
+                            var range = analyser.maxDecibels - analyser.minDecibels;
+
+                            canvasContext.moveTo(paddingLeft, innerBottom);
+
+                            for (var i = 0, len = data.length; i < len; i++) {
+                                var x = Math.floor((i / len) * innerWidth) + paddingLeft;
+                                var y = Math.floor(-1 * ((data[i] - analyser.maxDecibels) / range) * innerHeight) + paddingTop;
+
+                                canvasContext.lineTo(x, y);
+
+                                // Frequency resolution
+                                var fsDivN = context.sampleRate / analyser.fftSize;
+
+                                // This value is the number of samples during 440 Hz
+                                var n440Hz = Math.floor(440 / fsDivN);
+
+                                // 440 Hz ?
+                                if (i % n440Hz === 0) {
+                                    var f    = Math.floor(440 * (i / n440Hz));  // index -> frequency
+                                    var text = (f < 1000) ? (f + ' Hz') : ((f / 1000) + ' kHz');
+
+                                    // Draw grid (X)
+                                    canvasContext.fillStyle = 'rgba(255, 0, 0, 1.0)';
+                                    canvasContext.fillRect(x, paddingTop, 1, innerHeight);
+
+                                    // Draw text (X)
+                                    canvasContext.fillStyle = 'rgba(255, 255, 255, 1.0)';
+                                    canvasContext.font      = '13px "Times New Roman"';
+                                    canvasContext.fillText(text, (x - (canvasContext.measureText(text).width / 2)), (height - 3));
+                                }
+                            }
+
+                            break;
+                        default :
+                            break;
+                    }
+
+                    canvasContext.strokeStyle = 'rgba(0, 0, 255, 1.0)';
+                    canvasContext.lineWidth   = 2;
+                    canvasContext.lineCap     = 'round';
+                    canvasContext.lineJoin    = 'miter';
+                    canvasContext.stroke();
+
+                    switch (domain) {
+                        case 'time' :
+                            // Draw grid (Y)
+                            canvasContext.fillStyle = 'rgba(255, 0, 0, 1.0)';
+                            canvasContext.fillRect(paddingLeft, paddingTop,  innerWidth, 1);
+                            canvasContext.fillRect(paddingLeft, middle,      innerWidth, 1);
+                            canvasContext.fillRect(paddingLeft, innerBottom, innerWidth, 1);
+
+                            // Draw text (Y)
+                            canvasContext.fillStyle = 'rgba(255, 255, 255, 1.0)';
+                            canvasContext.font      = '13px "Times New Roman"';
+                            canvasContext.fillText(' 1.00', 3, paddingTop);
+                            canvasContext.fillText(' 0.00', 3, middle);
+                            canvasContext.fillText('-1.00', 3, innerBottom);
+
+                            break;
+                        case 'frequency' :
+                            for (var i = analyser.minDecibels; i <= analyser.maxDecibels; i += 10) {
+                                var gy = Math.floor(-1 * ((i - analyser.maxDecibels) / range) * innerHeight) + paddingTop;
+
+                                // Draw grid (Y)
+                                canvasContext.fillStyle = 'rgba(255, 0, 0, 1.0)';
+                                canvasContext.fillRect(paddingLeft, gy, innerWidth, 1);
+
+                                // Draw text (Y)
+                                canvasContext.fillStyle = 'rgba(255, 255, 255, 1.0)';
+                                canvasContext.font      = '13px "Times New Roman"';
+                                canvasContext.fillText((i + ' dB'), 3, gy);
+                            }
+
+                            break;
+                        default :
+                            break;
+                    }
+
+                    var self = arguments.callee;
+
+                    switch (domain) {
+                        case 'time' :
+                            timerids[0] = window.setTimeout(function() {
+                                self(domain);
+                            }, interval);
+
+                            break;
+                        case 'frequency' :
+                            timerids[1] = window.setTimeout(function() {
+                                self(domain);
+                            }, interval);
+
+                            break;
+                        default :
+                            break;
+                    }
+                };
+            };
+
+            var canvases = {
+                time     : null,
+                spectrum : null
+            };
+
+            var contexts = {
+                time     : null,
+                spectrum : null
+            };
+
+            canvases.time     = document.querySelectorAll('canvas')[0];
+            canvases.spectrum = document.querySelectorAll('canvas')[1];
+
+            contexts.time     = canvases.time.getContext('2d');
+            contexts.spectrum = canvases.spectrum.getContext('2d');
+
+            var drawTimeDomain = drawWave(canvases.time,     contexts.time);
+            var drawSpectrum   = drawWave(canvases.spectrum, contexts.spectrum);
+
+
+ //           var successCallback = function(stream) {
+                // Create the instance of MediaStreamAudioSourceNode
+                var source = context.createMediaStreamSource(event.stream);
+
+                // MediaStreamAudioSourceNode (Input) -> AnalyserNode (Visualization)
+                source.connect(analyser);
+
+                drawTimeDomain('time');
+                drawSpectrum('frequency');
+
+                //displayProperties(source, 'mediastreamaudiosourcenode-properties', 'MediaStreamAudioSourceNode');
+//            };
+
+            //remoteVideoElement.addEventListener("play", successCallback, false);
+
+            //remoteVideoElement.play();
 
         }
 
@@ -271,6 +435,9 @@
                 ws = null;
             }
         }
+
+
+
     </script>
     <style>
     </style>
@@ -279,14 +446,17 @@
 <div style="text-align:center">
     <video id="remote-video" autoplay width="640" height="480" class="vsc-initialized" data-vscid="ndza16m2s" controls
            src(unknown)></video>
-    <br/>
-    <canvas id="waveform-canvas" width="512" height="200"></canvas>
+    <div class="canvas-container">
+        <canvas width="640" height="120"></canvas>
+        <canvas width="640" height="120"></canvas>
+    </div>
 
     <div>
         <button id="start" class="button" style="background-color: green; color: white" onclick="start();">Start!
         </button>
         <button id="stop" class="button" style="background-color: red; color: white" onclick="stop();">Stop~</button>
     </div>
+
 </div>
 </body>
 </html>

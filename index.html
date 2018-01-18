@@ -56,6 +56,8 @@
             //console.log("Remote stream added:", URL.createObjectURL(event.stream));
             var remoteVideoElement = document.getElementById('remote-video');
             remoteVideoElement.src = URL.createObjectURL(event.stream);
+            remoteVideoElement.setAttribute("control",true);
+            remoteVideoElement.setAttribute("playsinline",true);
 
             var context = new AudioContext();
             var analyser = context.createAnalyser();
@@ -247,17 +249,17 @@
             var drawSpectrum   = drawWave(canvases.spectrum, contexts.spectrum);
 
 
- //           var successCallback = function(stream) {
-                // Create the instance of MediaStreamAudioSourceNode
-                var source = context.createMediaStreamSource(event.stream);
+            //           var successCallback = function(stream) {
+            // Create the instance of MediaStreamAudioSourceNode
+            var source = context.createMediaStreamSource(event.stream);
 
-                // MediaStreamAudioSourceNode (Input) -> AnalyserNode (Visualization)
-                source.connect(analyser);
+            // MediaStreamAudioSourceNode (Input) -> AnalyserNode (Visualization)
+            source.connect(analyser);
 
-                drawTimeDomain('time');
-                drawSpectrum('frequency');
+            drawTimeDomain('time');
+            drawSpectrum('frequency');
 
-                //displayProperties(source, 'mediastreamaudiosourcenode-properties', 'MediaStreamAudioSourceNode');
+            //displayProperties(source, 'mediastreamaudiosourcenode-properties', 'MediaStreamAudioSourceNode');
 //            };
 
             //remoteVideoElement.addEventListener("play", successCallback, false);
@@ -419,6 +421,7 @@
                     alert("An error has occurred!");
                     ws.close();
                 };
+                console.log(ws);
             } else {
                 alert("Sorry, this browser does not support WebSockets.");
             }
